@@ -1,93 +1,263 @@
-# HighFive
+# HighFive - HDF5 header-only C++ Library
+
+[![Doxygen -> gh-pages](https://github.com/BlueBrain/HighFive/workflows/gh-pages/badge.svg)](https://BlueBrain.github.io/HighFive)
+[![codecov](https://codecov.io/gh/BlueBrain/HighFive/branch/master/graph/badge.svg?token=UBKxHEn7RS)](https://codecov.io/gh/BlueBrain/HighFive)
+[![HighFive_Integration_tests](https://github.com/BlueBrain/HighFive-testing/actions/workflows/integration.yml/badge.svg)](https://github.com/BlueBrain/HighFive-testing/actions/workflows/integration.yml)
+
+Documentation: https://bluebrain.github.io/HighFive/
+
+## Brief
+
+HighFive is a modern header-only C++11 friendly interface for libhdf5.
+
+HighFive supports STL vector/string, Boost::UBLAS, Boost::Multi-array and Xtensor. It handles C++ from/to HDF5 with automatic type mapping.
+HighFive does not require additional libraries (see dependencies).
+
+It integrates nicely with other CMake projects by defining (and exporting) a HighFive target.
+
+### Design
+- Simple C++-ish minimalist interface
+- No other dependency than libhdf5
+- Zero overhead
+- Support C++11
+
+### Feature support
+- create/read/write files, datasets, attributes, groups, dataspaces.
+- automatic memory management / ref counting
+- automatic conversion of `std::vector` and nested `std::vector` from/to any dataset with basic types
+- automatic conversion of `std::string` to/from variable length string dataset
+- selection() / slice support
+- parallel Read/Write operations from several nodes with Parallel HDF5
+- Advanced types: Compound, Enum, Arrays of Fixed-length strings, References
+- half-precision (16-bit) floating-point datasets
+- `std::byte` in C++17 mode (with `-DCMAKE_CXX_STANDARD=17` or higher)
+- etc... (see [ChangeLog](./CHANGELOG.md))
+
+### Dependencies
+- hdf5 (dev)
+- hdf5-mpi (optional, opt-in with -D*HIGHFIVE_PARALLEL_HDF5*=ON)
+- boost >= 1.41 (recommended, opt-out with -D*HIGHFIVE_USE_BOOST*=OFF)
+- eigen3 (optional, opt-in with -D*HIGHFIVE_USE_EIGEN*=ON)
+- xtensor (optional, opt-in with -D*HIGHFIVE_USE_XTENSOR*=ON)
+- half (optional, opt-in with -D*HIGHFIVE_USE_HALF_FLOAT*=ON)
+
+### Known flaws
+- HighFive is not thread-safe. At best it has the same limitations as the HDF5 library. However, HighFive objects modify their members without protecting these writes. Users have reported that HighFive is not thread-safe even when using the threadsafe HDF5 library, e.g., https://github.com/BlueBrain/HighFive/discussions/675.
+- Eigen support in core HighFive is broken. See https://github.com/BlueBrain/HighFive/issues/532. H5Easy is not
+  affected.
+- The support of fixed length strings isn't ideal.
 
 
+## Examples
 
-## Getting started
+#### Write a std::vector<int> to 1D HDF5 dataset and read it back
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+```c++
+#include <highfive/highfive.hpp>
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+using namespace HighFive;
 
-## Add your files
+std::string filename = "/tmp/new_file.h5";
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+{
+    // We create an empty HDF55 file, by truncating an existing
+    // file if required:
+    File file(filename, File::Truncate);
 
+    std::vector<int> data(50, 1);
+    file.createDataSet("grp/data", data);
+}
+
+{
+    // We open the file as read-only:
+    File file(filename, File::ReadOnly);
+    auto dataset = file.getDataSet("grp/data");
+
+    // Read back, with allocating:
+    auto data = dataset.read<std::vector<int>>();
+
+    // Because `data` has the correct size, this will
+    // not cause `data` to be reallocated:
+    dataset.read(data);
+}
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/attx-engineering/highfive.git
-git branch -M main
-git push -uf origin main
+
+**Note:** `H5File.hpp` is the top-level header of HighFive core which should be always included.
+
+**Note:** For advanced usecases the dataset can be created without immediately
+writing to it. This is common in MPI-IO related patterns, or when growing a
+dataset over the course of a simulation.
+
+#### Write a 2 dimensional C double float array to a 2D HDF5 dataset
+
+See [create_dataset_double.cpp](https://github.com/BlueBrain/HighFive/blob/master/src/examples/create_dataset_double.cpp)
+
+#### Write and read a matrix of double float (boost::ublas) to a 2D HDF5 dataset
+
+See [boost_ublas_double.cpp](https://github.com/BlueBrain/HighFive/blob/master/src/examples/boost_ublas_double.cpp)
+
+#### Write and read a subset of a 2D double dataset
+
+See [select_partial_dataset_cpp11.cpp](https://github.com/BlueBrain/HighFive/blob/master/src/examples/select_partial_dataset_cpp11.cpp)
+
+#### Create, write and list HDF5 attributes
+
+See [create_attribute_string_integer.cpp](https://github.com/BlueBrain/HighFive/blob/master/src/examples/create_attribute_string_integer.cpp)
+
+#### And others
+
+See [src/examples/](https://github.com/BlueBrain/HighFive/blob/master/src/examples/) subdirectory for more info.
+
+
+### H5Easy
+
+For several 'standard' use cases the [highfive/H5Easy.hpp](include/highfive/H5Easy.hpp) interface is available. It allows:
+
+* Reading/writing in a single line of:
+
+    - scalars (to/from an extendible DataSet),
+    - strings,
+    - vectors (of standard types),
+    - [Eigen::Matrix](http://eigen.tuxfamily.org) (optional, enable CMake option `HIGHFIVE_USE_EIGEN`),
+    - [xt::xarray](https://github.com/QuantStack/xtensor) and [xt::xtensor](https://github.com/QuantStack/xtensor)
+      (optional, enable CMake option `HIGHFIVE_USE_XTENSOR`).
+    - [cv::Mat_](https://docs.opencv.org/master/df/dfc/classcv_1_1Mat__.html)
+      (optional, enable CMake option `HIGHFIVE_USE_OPENCV`).
+
+* Getting in a single line:
+
+    - the size of a DataSet,
+    - the shape of a DataSet.
+
+#### Example
+
+```cpp
+#include <highfive/H5Easy.hpp>
+
+int main() {
+    H5Easy::File file("example.h5", H5Easy::File::Overwrite);
+
+    int A = ...;
+    H5Easy::dump(file, "/path/to/A", A);
+
+    A = H5Easy::load<int>(file, "/path/to/A");
+}
 ```
 
-## Integrate with your tools
+whereby the `int` type of this example can be replaced by any of the above types. See [easy_load_dump.cpp](src/examples/easy_load_dump.cpp) for more details.
 
-- [ ] [Set up project integrations](https://gitlab.com/attx-engineering/highfive/-/settings/integrations)
+**Note:** Classes such as `H5Easy::File` are just short for the regular `HighFive` classes (in this case `HighFive::File`). They can thus be used interchangeably.
 
-## Collaborate with your team
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+## CMake integration
+There's two common paths of integrating HighFive into a CMake based project.
+The first is to "vendor" HighFive, the second is to install HighFive as a
+normal C++ library. Due to how HighFive CMake code works, sometimes following
+the third Bailout Approach is needed.
 
-## Test and Deploy
+### Vendoring HighFive
 
-Use the built-in continuous integration in GitLab.
+In this approach the HighFive sources are included in a subdirectory of the
+project (typically as a git submodule), for example in `third_party/HighFive`.
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+The projects `CMakeLists.txt` add the following lines
+```cmake
+add_executable(foo foo.cpp)
 
-***
+# You might want to turn off Boost support:
+if(NOT DEFINED HIGHFIVE_USE_BOOST)
+  set(HIGHFIVE_USE_BOOST Off)
+endif()
 
-# Editing this README
+# Include the subdirectory and use the target HighFive.
+add_subdirectory(third_party/HighFive)
+target_link_libraries(foo HighFive)
+```
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+**Note:** `add_subdirectory(third_party/HighFive)` will search and "link" HDF5
+and optional dependencies such as Boost.
 
-## Suggestions for a good README
+### Regular Installation of HighFive
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Alternatively you can install HighFive once and use it in several projects via
+`find_package()`. First one should clone the sources:
+```bash
+git clone --recursive https://github.com/BlueBrain/HighFive.git HighFive-src
+```
+By default CMake will install systemwide, which is likely not appropriate. The
+instruction below allow users to select a custom path where HighFive will be
+installed, e.g. `HIGHFIVE_INSTALL_PREFIX=${HOME}/third_party/HighFive` or some
+other location. The CMake invocations would be
+```bash
+cmake -DHIGHFIVE_EXAMPLES=Off \
+      -DHIGHFIVE_USE_BOOST=Off \
+      -DHIGHFIVE_UNIT_TESTS=Off \
+      -DCMAKE_INSTALL_PREFIX=${HIGHFIVE_INSTALL_PREFIX} \
+      -B HighFive-src/build \
+      HighFive-src
 
-## Name
-Choose a self-explaining name for your project.
+cmake --build HighFive-src/build
+cmake --install HighFive-src/build
+```
+This will install (i.e. copy) the headers to
+`${HIGHFIVE_INSTALL_PREFIX}/include` and some CMake files into an appropriate
+subfolder of `${HIGHFIVE_INSTALL_PREFIX}`.
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+The projects `CMakeLists.txt` should add the following:
+```cmake
+# ...
+add_executable(foo foo.cpp)
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+find_package(HighFive REQUIRED)
+target_link_libraries(foo HighFive)
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+**Note:** If HighFive hasn't been installed in a default location, CMake needs
+to be told where to find it which can be done by adding
+`-DCMAKE_PREFIX_PATH=${HIGHFIVE_INSTALL_PREFIX}` to the CMake command for
+building the project using HighFive. The variable `CMAKE_PREFIX_PATH` is a
+semi-colon `;` separated list of directories.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+**Note:** `find_package(HighFive)` will search and "link" HDF5 and optional
+dependencies such as Boost.
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+### The Bailout Approach
+Since both `add_subdirectory` and `find_package` will trigger finding HDF5 and
+other optional dependencies of HighFive as well as the `target_link_libraries`
+code for "linking" with the dependencies, things can go wrong.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+Fortunately, HighFive is a header only library and all that's needed is the
+headers. Preferably, the version obtained by installing HighFive, since those
+include `H5Version.hpp`. Let's assume they've been copied to
+`third_party/HighFive`. Then one could create a target:
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```bash
+add_library(HighFive INTERFACE)
+target_include_directory(HighFive INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/third_party/HighFive/include)
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+add_executable(foo foo.cpp)
+target_link_libraries(foo HighFive)
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+One known case where this is required is when vendoring the optional
+dependencies of HighFive.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+# Questions?
 
-## License
-For open source projects, say how it is licensed.
+Do you have questions on how to use HighFive? Would you like to share an interesting example or
+discuss HighFive features? Head over to the [Discussions](https://github.com/BlueBrain/HighFive/discussions)
+forum and join the community.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+For bugs and issues please use [Issues](https://github.com/BlueBrain/HighFive/issues).
+
+# Funding & Acknowledgment
+ 
+The development of this software was supported by funding to the Blue Brain Project, a research center of the École polytechnique fédérale de Lausanne (EPFL), from the Swiss government's ETH Board of the Swiss Federal Institutes of Technology.
+ 
+Copyright © 2015-2022 Blue Brain Project/EPFL
+
+
+### License
+
+Boost Software License 1.0
